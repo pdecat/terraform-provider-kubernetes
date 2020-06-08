@@ -22,8 +22,41 @@ func resourceKubernetesConfigMap() *schema.Resource {
 			State: schema.ImportStatePassthrough,
 		},
 
+		CustomizeDiff: func(d *schema.ResourceDiff, meta interface{}) error {
+			log.Printf("[ERROR] PDECAT d: %#v", d)
+			log.Printf("[ERROR] PDECAT meta: %#v", meta)
+			log.Printf("[ERROR] PDECAT d.UpdatedKeys(): %#v", d.UpdatedKeys())
+			log.Printf("[ERROR] PDECAT d.HasChange(\"metadata\"): %#v", d.HasChange("metadata"))
+			log.Printf("[ERROR] PDECAT d.HasChange(\"binary_data\"): %#v", d.HasChange("binary_data"))
+			log.Printf("[ERROR] PDECAT d.HasChange(\"data\"): %#v", d.HasChange("data"))
+			if d.HasChange("metadata") || d.HasChange("binary_data") || d.HasChange("data") {
+				// SetNewComputed does not work on nested fields
+				log.Printf("[ERROR] PDECAT d.SetNewComputed(\"resource_version\")")
+				if err := d.SetNewComputed("resource_version"); err != nil {
+					return err
+				}
+
+				log.Printf("[ERROR] PDECAT d.NewValueKnown(\"resource_version\"): %#v", d.NewValueKnown("resource_version"))
+				d.NewValueKnown("resource_version")
+			}
+			log.Printf("[ERROR] PDECAT d.UpdatedKeys(): %#v", d.UpdatedKeys())
+			return nil
+		},
+		// CustomizeDiff: customdiff.All(
+		// 	customdiff.ComputedIf("resource_version",
+		// 		func(d *schema.ResourceDiff, meta interface{}) bool {
+		// 			return d.HasChange("metadata") || d.HasChange("binary_data") || d.HasChange("data")
+		// 		},
+		// 	),
+		// ),
+
 		Schema: map[string]*schema.Schema{
 			"metadata": namespacedMetadataSchema("config map", true),
+			"resource_version": {
+				Type:        schema.TypeString,
+				Description: fmt.Sprintf("An opaque value that represents the internal version of this %s that can be used by clients to determine when %s has changed. Read more: https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md#concurrency-control-and-consistency", "config map", "config map"),
+				Computed:    true,
+			},
 			"binary_data": {
 				Type:         schema.TypeMap,
 				Description:  "BinaryData contains the binary data. Each key must consist of alphanumeric characters, '-', '_' or '.'. BinaryData can contain byte sequences that are not in the UTF-8 range. The keys stored in BinaryData must not overlap with the ones in the Data field, this is enforced during validation process. Using this field will require 1.10+ apiserver and kubelet. This field only accepts base64-encoded payloads that will be decoded/encoded before being sent/received to/from the apiserver.",
@@ -83,6 +116,9 @@ func resourceKubernetesConfigMapRead(d *schema.ResourceData, meta interface{}) e
 	if err != nil {
 		return err
 	}
+
+	// Duplicate this at root as SetNewComputed does not work on nested fields
+	d.Set("resource_version", cfgMap.ObjectMeta.GetObjectMeta().GetResourceVersion())
 
 	d.Set("binary_data", flattenByteMapToBase64Map(cfgMap.BinaryData))
 	d.Set("data", cfgMap.Data)
